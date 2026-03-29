@@ -1,0 +1,5 @@
+{
+  "name": "AI Sign Language Translator",
+  "description": "Real-time sign language recognition using MediaPipe and hand tracking.",
+  "requestFramePermissions": ["camera"]
+}
