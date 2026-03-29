@@ -53,102 +53,119 @@ export default function App() {
   const DETECTION_THRESHOLD = 8; // Lowered from 15 for faster response
 
   const speak = useCallback((text: string) => {
-    if (!isTtsEnabled || !text) return;
+    if (!isTtsEnabled || !text || text === GESTURES.NONE) return;
+    
+    // Cancel any ongoing speech to prevent queue buildup
+    window.speechSynthesis.cancel();
+    
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.85; // Slightly slower for better clarity
     utterance.pitch = 1;
+    utterance.volume = 1;
+    
     window.speechSynthesis.speak(utterance);
   }, [isTtsEnabled]);
 
   const processFrame = useCallback(() => {
-    if (
-      !videoRef.current || 
-      !canvasRef.current || 
-      !handLandmarkerRef.current ||
-      videoRef.current.readyState < 2
-    ) {
-      requestRef.current = requestAnimationFrame(processFrame);
-      return;
-    }
+  if (
+    !videoRef.current || 
+    !canvasRef.current || 
+    !handLandmarkerRef.current ||
+    videoRef.current.readyState < 2
+  ) {
+    requestRef.current = requestAnimationFrame(processFrame);
+    return;
+  }
 
-    const canvasCtx = canvasRef.current.getContext('2d');
-    if (!canvasCtx) return;
+  const canvasCtx = canvasRef.current.getContext('2d');
+  if (!canvasCtx) return;
 
-    const startTimeMs = performance.now();
-    const results = handLandmarkerRef.current.detectForVideo(videoRef.current, startTimeMs);
+  const startTimeMs = performance.now();
+  const results = handLandmarkerRef.current.detectForVideo(videoRef.current, startTimeMs);
 
-    canvasCtx.save();
-    canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+  canvasCtx.save();
+  canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+  
+  // Draw video frame normally (NO MIRROR)
+  canvasCtx.drawImage(
+    videoRef.current, 
+    0, 0, 
+    canvasRef.current.width, 
+    canvasRef.current.height
+  );
+
+  if (results.landmarks && results.landmarks.length > 0) {
+    const drawingUtils = new DrawingUtils(canvasCtx);
     
-    // Draw the video frame to canvas
-    canvasCtx.drawImage(
-      videoRef.current, 0, 0, canvasRef.current.width, canvasRef.current.height
-    );
+    for (const landmarks of results.landmarks) {
+      // Draw connections and landmarks normally (NO MIRROR)
+      drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
+        color: '#10b981',
+        lineWidth: 8
+      });
+      drawingUtils.drawLandmarks(landmarks, {
+        color: '#ef4444',
+        lineWidth: 1,
+        radius: 3
+      });
 
-    if (results.landmarks && results.landmarks.length > 0) {
-      const drawingUtils = new DrawingUtils(canvasCtx);
+      // Get gesture recognition
+      const gesture = recognizeGesture(landmarks as any);
       
-      for (const landmarks of results.landmarks) {
-        drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
-          color: '#10b981',
-          lineWidth: 8
-        });
-        drawingUtils.drawLandmarks(landmarks, {
-          color: '#ef4444',
-          lineWidth: 1,
-          radius: 3
-        });
-
-        const gestureResult = recognizeGesture(landmarks as any);
-        const gesture = gestureResult.gesture;
-        
-        if (gesture !== GESTURES.NONE) {
-          if (gesture === lastDetectedRef.current) {
-            detectionCountRef.current += 1;
-          } else {
-            lastDetectedRef.current = gesture;
-            detectionCountRef.current = 1;
-          }
-
-          if (detectionCountRef.current === DETECTION_THRESHOLD) {
-            setDetectedWord(gesture);
-            setConfidence(92 + Math.random() * 6);
-            
-            // Speak the gesture regardless of recording state
-            speak(gesture);
-            
-            if (isRecording) {
-              setCurrentSentence(prev => {
-                // Don't add the same word twice in a row immediately
-                if (prev[prev.length - 1] === gesture) return prev;
-                return [...prev, gesture];
-              });
-            } else {
-              // Add individual gesture to history if not recording
-              setHistory(prev => {
-                if (prev[0] === gesture) return prev;
-                return [gesture, ...prev].slice(0, 20);
-              });
-            }
-          }
+      if (gesture !== GESTURES.NONE) {
+        if (gesture === lastDetectedRef.current) {
+          detectionCountRef.current += 1;
         } else {
+          lastDetectedRef.current = gesture;
+          detectionCountRef.current = 1;
+        }
+
+        if (detectionCountRef.current === DETECTION_THRESHOLD) {
+          setDetectedWord(gesture);
+          setConfidence(92 + Math.random() * 6);
+          
+          // Speak the gesture regardless of recording state
+          speak(gesture);
+          
+          if (isRecording) {
+            setCurrentSentence(prev => {
+              // Don't add the same word twice in a row immediately
+              if (prev[prev.length - 1] === gesture) return prev;
+              return [...prev, gesture];
+            });
+          } else {
+            // Add individual gesture to history if not recording
+            setHistory(prev => {
+              if (prev[0] === gesture) return prev;
+              return [gesture, ...prev].slice(0, 20);
+            });
+          }
+        }
+      } else {
+        // Reset detection if no gesture
+        if (lastDetectedRef.current !== GESTURES.NONE) {
+          lastDetectedRef.current = GESTURES.NONE;
           detectionCountRef.current = 0;
           setDetectedWord(GESTURES.NONE);
           setConfidence(0);
         }
       }
-    } else {
+    }
+  } else {
+    if (detectedWord !== GESTURES.NONE) {
       setDetectedWord(GESTURES.NONE);
       setConfidence(0);
     }
-    
-    canvasCtx.restore();
-    requestRef.current = requestAnimationFrame(processFrame);
-  }, [isRecording, speak]);
+  }
+  
+  canvasCtx.restore();
+  requestRef.current = requestAnimationFrame(processFrame);
+}, [isRecording, speak, detectedWord]);
 
   useEffect(() => {
     const initializeMediaPipe = async () => {
       try {
+        console.log("Initializing MediaPipe...");
         const vision = await FilesetResolver.forVisionTasks(
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
         );
@@ -156,38 +173,37 @@ export default function App() {
         const handLandmarker = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-            delegate: "CPU" // Changed from GPU for better compatibility across devices
+            delegate: "GPU"
           },
           runningMode: "VIDEO",
-          numHands: 1
+          numHands: 2
         });
 
         handLandmarkerRef.current = handLandmarker;
+        console.log("HandLandmarker initialized");
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          console.log("Requesting camera access...");
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { 
-              width: { ideal: 1280 }, 
-              height: { ideal: 720 },
-              facingMode: "user"
-            }
+            video: { width: 1280, height: 720, facingMode: "user" }
           });
           
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
-            // Use a more robust way to start the video and detection
-            videoRef.current.onloadeddata = () => {
-              videoRef.current?.play().catch(e => console.error("Play error:", e));
+            videoRef.current.onloadedmetadata = () => {
+              videoRef.current?.play();
+              console.log("Video started playing");
               setIsLoading(false);
-              if (!requestRef.current) {
-                requestRef.current = requestAnimationFrame(processFrame);
-              }
+              requestRef.current = requestAnimationFrame(processFrame);
             };
           }
+        } else {
+          setError("Camera not supported in this browser");
+          setIsLoading(false);
         }
       } catch (err) {
         console.error("Init error:", err);
-        setError("Camera access denied or AI models failed to load.");
+        setError("Camera access denied or AI models failed to load. Please ensure you have granted camera permissions.");
         setIsLoading(false);
       }
     };
@@ -201,6 +217,7 @@ export default function App() {
         const stream = videoRef.current.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
       }
+      window.speechSynthesis.cancel();
     };
   }, [processFrame]);
 
@@ -228,15 +245,19 @@ export default function App() {
   const clearHistory = () => setHistory([]);
 
   const supportedGestures = [
-    { name: "Hello", desc: "Open Palm (Spread)" },
-    { name: "Stop", desc: "Open Palm (Together)" },
+    { name: "Hello", desc: "Open Palm (Spread Fingers)" },
+    { name: "Stop", desc: "Open Palm (Fingers Together)" },
     { name: "Yes", desc: "Closed Fist" },
-    { name: "No", desc: "Index/Middle Pinch" },
-    { name: "Thank You", desc: "Flat Hand Tilted" },
-    { name: "Thumbs Up", desc: "Thumb Up" },
-    { name: "Point", desc: "Index Extended" },
-    { name: "Peace", desc: "V-Shape" },
-    { name: "OK", desc: "👌 Gesture" }
+    { name: "No", desc: "Index & Middle Finger Pinched" },
+    { name: "Thank You", desc: "Flat Hand with Thumb Tucked" },
+    { name: "Thumbs Up", desc: "Thumb Up, Fingers Closed" },
+    { name: "Point", desc: "Index Finger Extended" },
+    { name: "Peace", desc: "V-Shape with Spread Fingers" },
+    { name: "OK", desc: "👌 Thumb & Index Circle" },
+    { name: "Rock On", desc: "Index & Pinky Extended" },
+    { name: "Call Me", desc: "Thumb & Pinky Extended" },
+    { name: "I Love You", desc: "Index, Pinky & Thumb Extended" },
+    { name: "Dislike", desc: "Thumb Pointing Down" }
   ];
 
   return (
@@ -296,10 +317,15 @@ export default function App() {
             )}
 
             <video ref={videoRef} className="hidden" playsInline muted />
-            <canvas ref={canvasRef} className="w-full h-full object-cover mirror" width={1280} height={720} />
+            <canvas 
+              ref={canvasRef} 
+              className="w-full h-full object-cover" 
+              width={1280} 
+              height={720} 
+            />
 
             {/* Recording Indicator */}
-            <div className="absolute top-8 left-8 flex items-center gap-3 px-4 py-2 bg-black/60 backdrop-blur-xl rounded-2xl border border-white/10">
+            <div className="absolute top-8 left-8 flex items-center gap-3 px-4 py-2 bg-black/60 backdrop-blur-xl rounded-2xl border border-white/10 z-10">
               <div className={cn("w-2.5 h-2.5 rounded-full", isRecording ? "bg-red-500 animate-pulse" : "bg-emerald-500")} />
               <span className="text-[10px] font-black uppercase tracking-widest text-white/80">
                 {isRecording ? "Recording Sentence" : "Live Stream"}
@@ -307,7 +333,7 @@ export default function App() {
             </div>
 
             {/* Controls Overlay */}
-            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4">
+            <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 z-10">
               <button 
                 onClick={toggleRecording}
                 className={cn(
@@ -498,7 +524,6 @@ export default function App() {
       </AnimatePresence>
 
       <style dangerouslySetInnerHTML={{ __html: `
-        .mirror { transform: scaleX(-1); }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
