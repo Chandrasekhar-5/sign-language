@@ -7,9 +7,17 @@ import { GESTURES, HandLandmark } from "./types";
 export function recognizeGesture(landmarks: HandLandmark[]): string {
   if (!landmarks || landmarks.length < 21) return GESTURES.NONE;
 
-  // Helper to check if a finger is extended
+  // Helper to check if a finger is extended (distance from wrist)
   const isExtended = (tipIdx: number, pipIdx: number) => {
-    return landmarks[tipIdx].y < landmarks[pipIdx].y;
+    const distTip = Math.sqrt(
+      Math.pow(landmarks[tipIdx].x - landmarks[0].x, 2) + 
+      Math.pow(landmarks[tipIdx].y - landmarks[0].y, 2)
+    );
+    const distPip = Math.sqrt(
+      Math.pow(landmarks[pipIdx].x - landmarks[0].x, 2) + 
+      Math.pow(landmarks[pipIdx].y - landmarks[0].y, 2)
+    );
+    return distTip > distPip * 1.1; // Add a small buffer
   };
 
   const indexExtended = isExtended(8, 6);
@@ -25,11 +33,12 @@ export function recognizeGesture(landmarks: HandLandmark[]): string {
     );
   };
 
-  // 1. THUMBS UP: Thumb extended, others folded
-  const thumbUp = landmarks[4].y < landmarks[3].y && 
-                  landmarks[8].y > landmarks[6].y && 
-                  landmarks[12].y > landmarks[10].y &&
-                  landmarks[16].y > landmarks[14].y;
+  // 1. THUMBS UP: Thumb tip is highest and far from palm
+  const thumbTip = landmarks[4];
+  const thumbBase = landmarks[2];
+  const thumbExtended = getDist(4, 0) > getDist(2, 0) * 1.2;
+  const thumbUp = thumbTip.y < landmarks[2].y && thumbExtended && !indexExtended && !middleExtended;
+
   if (thumbUp) return GESTURES.THUMBS_UP;
 
   // 2. POINT: Index extended, others folded
@@ -44,12 +53,12 @@ export function recognizeGesture(landmarks: HandLandmark[]): string {
 
   // 4. OK: Thumb and Index tips are close, others extended
   const distThumbIndex = getDist(4, 8);
-  if (distThumbIndex < 0.05 && middleExtended && ringExtended && pinkyExtended) {
+  if (distThumbIndex < 0.06 && middleExtended && ringExtended && pinkyExtended) {
     return GESTURES.OK;
   }
 
   // 5. NO: Index and Middle extended but close to thumb (pinching motion)
-  if (indexExtended && middleExtended && !ringExtended && !pinkyExtended && distThumbIndex < 0.1) {
+  if (indexExtended && middleExtended && !ringExtended && !pinkyExtended && distThumbIndex < 0.12) {
     return GESTURES.NO;
   }
 
@@ -58,23 +67,19 @@ export function recognizeGesture(landmarks: HandLandmark[]): string {
     return GESTURES.YES;
   }
 
-  // 7. THANK YOU: Fingers together, hand slightly tilted (simplified for static)
-  // Often represented as a flat hand near the mouth, but here we'll use a specific flat hand pose
-  const fingersTogether = getDist(8, 12) < 0.05 && getDist(12, 16) < 0.05 && getDist(16, 20) < 0.05;
+  // 7. STOP: All fingers extended and together
+  const fingersTogether = getDist(8, 12) < 0.08 && getDist(12, 16) < 0.08 && getDist(16, 20) < 0.08;
   if (indexExtended && middleExtended && ringExtended && pinkyExtended && fingersTogether) {
-    // Distinguish between HELLO and STOP
-    // STOP: Fingers together, palm flat
-    // HELLO: Fingers spread
     return GESTURES.STOP;
   }
 
+  // 8. HELLO: All fingers extended and spread
   if (indexExtended && middleExtended && ringExtended && pinkyExtended && !fingersTogether) {
     return GESTURES.HELLO;
   }
 
-  // 8. THANK YOU (Alternative pose: flat hand tilted)
-  if (indexExtended && middleExtended && ringExtended && pinkyExtended && landmarks[4].y > landmarks[3].y) {
-     // If thumb is tucked in and fingers are flat, we can call it Thank You for this demo
+  // 9. THANK YOU: Flat hand, thumb tucked or slightly out
+  if (indexExtended && middleExtended && ringExtended && pinkyExtended && landmarks[4].y > landmarks[8].y) {
      return GESTURES.THANK_YOU;
   }
 

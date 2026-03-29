@@ -50,7 +50,7 @@ export default function App() {
   // Refs for detection logic
   const lastDetectedRef = useRef<string>(GESTURES.NONE);
   const detectionCountRef = useRef<number>(0);
-  const DETECTION_THRESHOLD = 15;
+  const DETECTION_THRESHOLD = 8; // Lowered from 15 for faster response
 
   const speak = useCallback((text: string) => {
     if (!isTtsEnabled || !text) return;
@@ -89,7 +89,7 @@ export default function App() {
       for (const landmarks of results.landmarks) {
         drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
           color: '#10b981',
-          lineWidth: 4
+          lineWidth: 8
         });
         drawingUtils.drawLandmarks(landmarks, {
           color: '#ef4444',
@@ -111,13 +111,20 @@ export default function App() {
             setDetectedWord(gesture);
             setConfidence(92 + Math.random() * 6);
             
-            // Only add to sentence if recording
+            // Speak the gesture regardless of recording state
+            speak(gesture);
+            
             if (isRecording) {
               setCurrentSentence(prev => {
                 // Don't add the same word twice in a row immediately
                 if (prev[prev.length - 1] === gesture) return prev;
-                speak(gesture);
                 return [...prev, gesture];
+              });
+            } else {
+              // Add individual gesture to history if not recording
+              setHistory(prev => {
+                if (prev[0] === gesture) return prev;
+                return [gesture, ...prev].slice(0, 20);
               });
             }
           }
@@ -363,9 +370,15 @@ export default function App() {
                       key={i}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className="p-4 bg-white/5 rounded-2xl border border-white/5"
+                      className="p-4 bg-white/5 rounded-2xl border border-white/5 flex justify-between items-center group/item"
                     >
-                      <p className="text-sm font-medium text-white/80 leading-relaxed">{item}</p>
+                      <p className="text-sm font-medium text-white/80 leading-relaxed flex-1">{item}</p>
+                      <button 
+                        onClick={() => speak(item)}
+                        className="p-2 text-white/20 hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all opacity-0 group-hover/item:opacity-100"
+                      >
+                        <Volume2 size={16} />
+                      </button>
                     </motion.div>
                   ))
                 )}
