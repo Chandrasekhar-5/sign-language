@@ -356,7 +356,7 @@ export default function App() {
           <div className="lg:col-span-4 h-full flex flex-col gap-6">
             <div className="bg-white/5 rounded-4xl p-10 border border-white/5 flex flex-col items-center justify-center flex-1 relative overflow-hidden group min-h-75">
               <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-transparent via-emerald-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/20 mb-8">Real-time Gesture</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white mb-8">Real-time Gesture</p>
               
               <AnimatePresence mode="wait">
                 <motion.div
@@ -397,7 +397,7 @@ export default function App() {
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
                 {history.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-white/10 text-center p-6">
+                  <div className="h-full flex flex-col items-center justify-center text-white text-center p-6">
                     <p className="text-[10px] font-bold uppercase tracking-widest">No records</p>
                   </div>
                 ) : (
@@ -431,10 +431,10 @@ export default function App() {
                 <MessageSquare className="text-emerald-500 w-8 h-8" />
               </div>
               <div className="flex-1">
-                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/20 mb-2">Current Sentence</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white mb-2">Current Sentence</p>
                 <div className="flex flex-wrap gap-2 min-h-10">
                   {currentSentence.length === 0 ? (
-                    <p className="text-white/10 font-medium italic">Start recording to build a sentence...</p>
+                    <p className="text-white font-medium italic">Start recording to build a sentence...</p>
                   ) : (
                     currentSentence.map((word, i) => (
                       <motion.span 
