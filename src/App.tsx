@@ -99,7 +99,8 @@ export default function App() {
           radius: 3
         });
 
-        const gesture = recognizeGesture(landmarks as any);
+        const gestureResult = recognizeGesture(landmarks as any);
+        const gesture = gestureResult.gesture;
         
         if (gesture !== GESTURES.NONE) {
           if (gesture === lastDetectedRef.current) {
@@ -155,7 +156,7 @@ export default function App() {
         const handLandmarker = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
             modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-            delegate: "GPU"
+            delegate: "CPU" // Changed from GPU for better compatibility across devices
           },
           runningMode: "VIDEO",
           numHands: 1
@@ -165,15 +166,22 @@ export default function App() {
 
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 1280, height: 720 }
+            video: { 
+              width: { ideal: 1280 }, 
+              height: { ideal: 720 },
+              facingMode: "user"
+            }
           });
           
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
-            videoRef.current.onloadedmetadata = () => {
-              videoRef.current?.play();
+            // Use a more robust way to start the video and detection
+            videoRef.current.onloadeddata = () => {
+              videoRef.current?.play().catch(e => console.error("Play error:", e));
               setIsLoading(false);
-              requestRef.current = requestAnimationFrame(processFrame);
+              if (!requestRef.current) {
+                requestRef.current = requestAnimationFrame(processFrame);
+              }
             };
           }
         }
