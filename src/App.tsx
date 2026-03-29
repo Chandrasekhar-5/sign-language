@@ -290,11 +290,11 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-[1600px] mx-auto p-6 space-y-8">
+      <main className="max-w-400 mx-auto p-6 space-y-8">
         {/* Top Row: Video and Detected Gesture */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Video Feed */}
-          <div className="lg:col-span-8 relative aspect-video bg-white/5 rounded-[2rem] overflow-hidden border border-white/5 shadow-2xl group">
+          <div className="lg:col-span-8 relative aspect-video bg-white/5 rounded-4xl overflow-hidden border border-white/5 shadow-2xl group">
             {isLoading && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#050505]">
                 <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mb-4" />
@@ -354,8 +354,8 @@ export default function App() {
 
           {/* Detected Gesture Card */}
           <div className="lg:col-span-4 h-full flex flex-col gap-6">
-            <div className="bg-white/5 rounded-[2rem] p-10 border border-white/5 flex flex-col items-center justify-center flex-1 relative overflow-hidden group min-h-[300px]">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="bg-white/5 rounded-4xl p-10 border border-white/5 flex flex-col items-center justify-center flex-1 relative overflow-hidden group min-h-75">
+              <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-transparent via-emerald-500/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
               <p className="text-[10px] font-black uppercase tracking-[0.4em] text-white/20 mb-8">Real-time Gesture</p>
               
               <AnimatePresence mode="wait">
@@ -385,7 +385,7 @@ export default function App() {
             </div>
 
             {/* History Sidebar */}
-            <div className="bg-white/5 rounded-[2rem] border border-white/5 flex flex-col h-[300px]">
+            <div className="bg-white/5 rounded-4xl border border-white/5 flex flex-col h-75">
               <div className="p-6 border-b border-white/5 flex justify-between items-center">
                 <div className="flex items-center gap-2">
                   <History size={18} className="text-emerald-500" />
@@ -432,7 +432,7 @@ export default function App() {
               </div>
               <div className="flex-1">
                 <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/20 mb-2">Current Sentence</p>
-                <div className="flex flex-wrap gap-2 min-h-[40px]">
+                <div className="flex flex-wrap gap-2 min-h-10">
                   {currentSentence.length === 0 ? (
                     <p className="text-white/10 font-medium italic">Start recording to build a sentence...</p>
                   ) : (
@@ -490,7 +490,7 @@ export default function App() {
       {/* Gestures Modal */}
       <AnimatePresence>
         {showAllGestures && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <div className="fixed inset-0 z-100 flex items-center justify-center p-6">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -512,7 +512,7 @@ export default function App() {
               </div>
               <div className="p-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
                 {supportedGestures.map((sign) => (
-                  <div key={sign.name} className="p-8 bg-white/5 rounded-[2rem] border border-white/5">
+                  <div key={sign.name} className="p-8 bg-white/5 rounded-4xl border border-white/5">
                     <p className="text-xl font-black text-emerald-400 mb-2 uppercase tracking-tight">{sign.name}</p>
                     <p className="text-xs text-white/40 font-medium leading-relaxed">{sign.desc}</p>
                   </div>
