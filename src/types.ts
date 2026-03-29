@@ -19,5 +19,9 @@ export const GESTURES = {
   POINT: "Point",
   PEACE: "Peace",
   OK: "OK",
+  ROCK: "Rock",
+  CALL_ME: "Call Me",
+  DISLIKE: "Dislike",
+  LOVE: "I Love You",
   NONE: "None",
 };

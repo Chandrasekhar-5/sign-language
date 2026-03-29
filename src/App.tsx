@@ -55,6 +55,8 @@ export default function App() {
   const speak = useCallback((text: string) => {
     if (!isTtsEnabled || !text) return;
     const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.85; // Slightly slower for better clarity
+    utterance.pitch = 1;
     window.speechSynthesis.speak(utterance);
   }, [isTtsEnabled]);
 

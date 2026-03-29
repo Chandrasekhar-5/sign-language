@@ -1,30 +1,20 @@
 import { GESTURES, HandLandmark } from "./types";
 
 /**
- * Heuristic-based gesture recognition logic.
- * Calculates distances and relative positions of hand landmarks to predict gestures.
+ * Data-driven gesture recognition.
+ * Instead of hardcoding logic for every sign, we define "Signatures"
+ * which are patterns of which fingers are extended.
  */
-export function recognizeGesture(landmarks: HandLandmark[]): string {
-  if (!landmarks || landmarks.length < 21) return GESTURES.NONE;
 
-  // Helper to check if a finger is extended (distance from wrist)
-  const isExtended = (tipIdx: number, pipIdx: number) => {
-    const distTip = Math.sqrt(
-      Math.pow(landmarks[tipIdx].x - landmarks[0].x, 2) + 
-      Math.pow(landmarks[tipIdx].y - landmarks[0].y, 2)
-    );
-    const distPip = Math.sqrt(
-      Math.pow(landmarks[pipIdx].x - landmarks[0].x, 2) + 
-      Math.pow(landmarks[pipIdx].y - landmarks[0].y, 2)
-    );
-    return distTip > distPip * 1.1; // Add a small buffer
-  };
+interface GestureTemplate {
+  name: string;
+  signature: string; // 5-bit string: Thumb, Index, Middle, Ring, Pinky (1=Up, 0=Down)
+  specialCheck?: (landmarks: HandLandmark[], dists: any) => boolean;
+}
 
-  const indexExtended = isExtended(8, 6);
-  const middleExtended = isExtended(12, 10);
-  const ringExtended = isExtended(16, 14);
-  const pinkyExtended = isExtended(20, 18);
-  
+export function recognizeGesture(landmarks: HandLandmark[]): { gesture: string, signature: string } {
+  if (!landmarks || landmarks.length < 21) return { gesture: GESTURES.NONE, signature: "00000" };
+
   // Distance helper
   const getDist = (p1: number, p2: number) => {
     return Math.sqrt(
@@ -33,55 +23,76 @@ export function recognizeGesture(landmarks: HandLandmark[]): string {
     );
   };
 
-  // 1. THUMBS UP: Thumb tip is highest and far from palm
-  const thumbTip = landmarks[4];
-  const thumbBase = landmarks[2];
-  const thumbExtended = getDist(4, 0) > getDist(2, 0) * 1.2;
-  const thumbUp = thumbTip.y < landmarks[2].y && thumbExtended && !indexExtended && !middleExtended;
+  // 1. Calculate finger states (1 = Extended, 0 = Folded)
+  // We compare tip distance from wrist vs pip distance from wrist
+  const isExtended = (tipIdx: number, pipIdx: number) => {
+    const distTip = getDist(tipIdx, 0);
+    const distPip = getDist(pipIdx, 0);
+    return distTip > distPip * 1.15;
+  };
 
-  if (thumbUp) return GESTURES.THUMBS_UP;
+  // Thumb is special (horizontal distance from palm center)
+  const thumbExtended = getDist(4, 0) > getDist(2, 0) * 1.3;
+  
+  const states = [
+    thumbExtended ? "1" : "0",
+    isExtended(8, 6) ? "1" : "0",
+    isExtended(12, 10) ? "1" : "0",
+    isExtended(16, 14) ? "1" : "0",
+    isExtended(20, 18) ? "1" : "0"
+  ];
 
-  // 2. POINT: Index extended, others folded
-  if (indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
-    return GESTURES.POINT;
+  const signature = states.join("");
+
+  // 2. Define the Library
+  const GESTURE_LIBRARY: GestureTemplate[] = [
+    { 
+      name: GESTURES.THUMBS_UP, 
+      signature: "10000",
+      specialCheck: (l) => l[4].y < l[2].y // Thumb must be pointing up
+    },
+    { name: GESTURES.POINT, signature: "01000" },
+    { 
+      name: GESTURES.PEACE, 
+      signature: "01100",
+      specialCheck: (l) => getDist(8, 12) > 0.08 // Fingers must be spread
+    },
+    { 
+      name: GESTURES.NO, 
+      signature: "01100",
+      specialCheck: (l) => getDist(8, 12) < 0.05 // Fingers must be close (pinching)
+    },
+    { 
+      name: GESTURES.OK, 
+      signature: "01111",
+      specialCheck: (l) => getDist(4, 8) < 0.06 // Thumb and Index touching
+    },
+    { name: GESTURES.YES, signature: "00000" }, // Fist
+    { 
+      name: GESTURES.STOP, 
+      signature: "11111",
+      specialCheck: (l) => getDist(8, 12) < 0.05 // Fingers together
+    },
+    { 
+      name: GESTURES.HELLO, 
+      signature: "11111",
+      specialCheck: (l) => getDist(8, 12) >= 0.05 // Fingers spread
+    },
+    { 
+      name: GESTURES.THANK_YOU, 
+      signature: "01111",
+      specialCheck: (l) => getDist(4, 8) >= 0.06 // Flat hand, thumb tucked
+    }
+  ];
+
+  // 3. Match against library
+  for (const template of GESTURE_LIBRARY) {
+    if (template.signature === signature) {
+      if (!template.specialCheck || template.specialCheck(landmarks, {})) {
+        return { gesture: template.name, signature };
+      }
+    }
   }
 
-  // 3. PEACE: Index and Middle extended, others folded
-  if (indexExtended && middleExtended && !ringExtended && !pinkyExtended) {
-    return GESTURES.PEACE;
-  }
-
-  // 4. OK: Thumb and Index tips are close, others extended
-  const distThumbIndex = getDist(4, 8);
-  if (distThumbIndex < 0.06 && middleExtended && ringExtended && pinkyExtended) {
-    return GESTURES.OK;
-  }
-
-  // 5. NO: Index and Middle extended but close to thumb (pinching motion)
-  if (indexExtended && middleExtended && !ringExtended && !pinkyExtended && distThumbIndex < 0.12) {
-    return GESTURES.NO;
-  }
-
-  // 6. YES (Fist): All fingers folded
-  if (!indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
-    return GESTURES.YES;
-  }
-
-  // 7. STOP: All fingers extended and together
-  const fingersTogether = getDist(8, 12) < 0.08 && getDist(12, 16) < 0.08 && getDist(16, 20) < 0.08;
-  if (indexExtended && middleExtended && ringExtended && pinkyExtended && fingersTogether) {
-    return GESTURES.STOP;
-  }
-
-  // 8. HELLO: All fingers extended and spread
-  if (indexExtended && middleExtended && ringExtended && pinkyExtended && !fingersTogether) {
-    return GESTURES.HELLO;
-  }
-
-  // 9. THANK YOU: Flat hand, thumb tucked or slightly out
-  if (indexExtended && middleExtended && ringExtended && pinkyExtended && landmarks[4].y > landmarks[8].y) {
-     return GESTURES.THANK_YOU;
-  }
-
-  return GESTURES.NONE;
+  return { gesture: GESTURES.NONE, signature };
 }
