@@ -6,11 +6,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  HandLandmarker, 
-  FilesetResolver,
-  DrawingUtils
-} from '@mediapipe/tasks-vision';
-import { 
   History, 
   Volume2, 
   VolumeX, 
@@ -24,17 +19,24 @@ import {
   Square,
   MessageSquare,
   ChevronRight,
-  X
+  X,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
-import { recognizeGesture } from './gestureLogic';
+import { websocketService, type Prediction } from './services/websocketService';
 import { GESTURES } from './types';
 import { cn } from './lib/utils';
+
+// WebSocket server URL - change this to your backend URL
+const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws';
+// HTTP API URL for health checks
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
-  const requestRef = useRef<number>(null);
+  const animationRef = useRef<number>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   
   // State
   const [detectedWord, setDetectedWord] = useState<string>(GESTURES.NONE);
@@ -46,12 +48,16 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [confidence, setConfidence] = useState(0);
   const [showAllGestures, setShowAllGestures] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [handDetected, setHandDetected] = useState(false);
+  const [bufferStatus, setBufferStatus] = useState({ buffer_size: 0, max_size: 30, is_ready: false });
   
   // Refs for detection logic
   const lastDetectedRef = useRef<string>(GESTURES.NONE);
   const detectionCountRef = useRef<number>(0);
-  const DETECTION_THRESHOLD = 8; // Lowered from 15 for faster response
+  const DETECTION_THRESHOLD = 5; // Lowered for faster response with ML model
 
+  // Text-to-speech function
   const speak = useCallback((text: string) => {
     if (!isTtsEnabled || !text || text === GESTURES.NONE) return;
     
@@ -59,167 +65,173 @@ export default function App() {
     window.speechSynthesis.cancel();
     
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.85; // Slightly slower for better clarity
+    utterance.rate = 0.85;
     utterance.pitch = 1;
     utterance.volume = 1;
     
     window.speechSynthesis.speak(utterance);
   }, [isTtsEnabled]);
 
-  const processFrame = useCallback(() => {
-  if (
-    !videoRef.current || 
-    !canvasRef.current || 
-    !handLandmarkerRef.current ||
-    videoRef.current.readyState < 2
-  ) {
-    requestRef.current = requestAnimationFrame(processFrame);
-    return;
-  }
-
-  const canvasCtx = canvasRef.current.getContext('2d');
-  if (!canvasCtx) return;
-
-  const startTimeMs = performance.now();
-  const results = handLandmarkerRef.current.detectForVideo(videoRef.current, startTimeMs);
-
-  canvasCtx.save();
-  canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-  
-  // Draw video frame normally (NO MIRROR)
-  canvasCtx.drawImage(
-    videoRef.current, 
-    0, 0, 
-    canvasRef.current.width, 
-    canvasRef.current.height
-  );
-
-  if (results.landmarks && results.landmarks.length > 0) {
-    const drawingUtils = new DrawingUtils(canvasCtx);
+  // Handle predictions from WebSocket
+  const handlePrediction = useCallback((prediction: Prediction) => {
+    const gesture = prediction.gesture;
+    const conf = prediction.confidence;
     
-    for (const landmarks of results.landmarks) {
-      // Draw connections and landmarks normally (NO MIRROR)
-      drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
-        color: '#10b981',
-        lineWidth: 8
-      });
-      drawingUtils.drawLandmarks(landmarks, {
-        color: '#ef4444',
-        lineWidth: 1,
-        radius: 3
-      });
-
-      // Get gesture recognition
-      const gesture = recognizeGesture(landmarks as any);
-      
-      if (gesture !== GESTURES.NONE) {
-        if (gesture === lastDetectedRef.current) {
-          detectionCountRef.current += 1;
-        } else {
-          lastDetectedRef.current = gesture;
-          detectionCountRef.current = 1;
-        }
-
-        if (detectionCountRef.current === DETECTION_THRESHOLD) {
-          setDetectedWord(gesture);
-          setConfidence(92 + Math.random() * 6);
-          
-          // Speak the gesture regardless of recording state
-          speak(gesture);
-          
-          if (isRecording) {
-            setCurrentSentence(prev => {
-              // Don't add the same word twice in a row immediately
-              if (prev[prev.length - 1] === gesture) return prev;
-              return [...prev, gesture];
-            });
-          } else {
-            // Add individual gesture to history if not recording
-            setHistory(prev => {
-              if (prev[0] === gesture) return prev;
-              return [gesture, ...prev].slice(0, 20);
-            });
-          }
-        }
+    setDetectedWord(gesture);
+    setConfidence(conf * 100);
+    setHandDetected(prediction.hand_detected);
+    setBufferStatus(prediction.buffer_status);
+    
+    // Only process gesture if confidence is high enough
+    if (gesture !== GESTURES.NONE && conf > 0.6) {
+      if (gesture === lastDetectedRef.current) {
+        detectionCountRef.current += 1;
       } else {
-        // Reset detection if no gesture
-        if (lastDetectedRef.current !== GESTURES.NONE) {
-          lastDetectedRef.current = GESTURES.NONE;
-          detectionCountRef.current = 0;
-          setDetectedWord(GESTURES.NONE);
-          setConfidence(0);
+        lastDetectedRef.current = gesture;
+        detectionCountRef.current = 1;
+      }
+      
+      // Only trigger when gesture is consistently detected
+      if (detectionCountRef.current === DETECTION_THRESHOLD) {
+        // Speak the gesture
+        speak(gesture);
+        
+        if (isRecording) {
+          setCurrentSentence(prev => {
+            // Don't add the same word twice in a row
+            if (prev[prev.length - 1] === gesture) return prev;
+            return [...prev, gesture];
+          });
+        } else {
+          // Add individual gesture to history
+          setHistory(prev => {
+            if (prev[0] === gesture) return prev;
+            return [gesture, ...prev].slice(0, 20);
+          });
         }
       }
+    } else {
+      // Reset detection if no gesture
+      if (lastDetectedRef.current !== GESTURES.NONE) {
+        lastDetectedRef.current = GESTURES.NONE;
+        detectionCountRef.current = 0;
+      }
     }
-  } else {
-    if (detectedWord !== GESTURES.NONE) {
-      setDetectedWord(GESTURES.NONE);
-      setConfidence(0);
+    
+    // Update canvas with processed frame from server
+    if (prediction.frame && canvasRef.current) {
+      const img = new Image();
+      img.onload = () => {
+        const ctx = canvasRef.current?.getContext('2d');
+        if (ctx && canvasRef.current) {
+          ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        }
+      };
+      img.src = `data:image/jpeg;base64,${prediction.frame}`;
     }
-  }
-  
-  canvasCtx.restore();
-  requestRef.current = requestAnimationFrame(processFrame);
-}, [isRecording, speak, detectedWord]);
+  }, [isRecording, speak]);
 
+  // Capture video frames and send to WebSocket
+  const captureAndSendFrame = useCallback(() => {
+    if (!videoRef.current || !canvasRef.current || !websocketService.isConnectedToServer) {
+      animationRef.current = requestAnimationFrame(captureAndSendFrame);
+      return;
+    }
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    if (ctx && video.videoWidth > 0) {
+      // Set canvas dimensions to match video
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+      
+      // Draw video frame to canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      
+      // Convert canvas to base64 JPEG
+      const base64Frame = canvas.toDataURL('image/jpeg', 0.8);
+      
+      // Send to WebSocket
+      websocketService.sendFrame(base64Frame);
+    }
+    
+    animationRef.current = requestAnimationFrame(captureAndSendFrame);
+  }, []);
+
+  // Initialize camera and WebSocket
   useEffect(() => {
-    const initializeMediaPipe = async () => {
+    const initialize = async () => {
       try {
-        console.log("Initializing MediaPipe...");
-        const vision = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-        );
+        setIsLoading(true);
         
-        const handLandmarker = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-            delegate: "GPU"
+        // Check if backend is reachable
+        const healthResponse = await fetch(`${API_URL}/health`);
+        if (!healthResponse.ok) {
+          throw new Error('Backend server is not reachable');
+        }
+        
+        // Connect WebSocket
+        await websocketService.connect(WS_URL);
+        setIsConnected(true);
+        
+        // Set up WebSocket callbacks
+        websocketService.setCallbacks({
+          onPrediction: handlePrediction,
+          onError: (err) => {
+            console.error('WebSocket error:', err);
+            setError(err);
           },
-          runningMode: "VIDEO",
-          numHands: 2
-        });
-
-        handLandmarkerRef.current = handLandmarker;
-        console.log("HandLandmarker initialized");
-
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          console.log("Requesting camera access...");
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 1280, height: 720, facingMode: "user" }
-          });
-          
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.onloadedmetadata = () => {
-              videoRef.current?.play();
-              console.log("Video started playing");
-              setIsLoading(false);
-              requestRef.current = requestAnimationFrame(processFrame);
-            };
+          onConnected: () => {
+            console.log('Connected to WebSocket');
+            setIsConnected(true);
+            setError(null);
+          },
+          onDisconnected: () => {
+            console.log('Disconnected from WebSocket');
+            setIsConnected(false);
           }
-        } else {
-          setError("Camera not supported in this browser");
+        });
+        
+        // Request camera access
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: "user" }
+        });
+        
+        streamRef.current = stream;
+        
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          
+          // Start frame capture
+          animationRef.current = requestAnimationFrame(captureAndSendFrame);
           setIsLoading(false);
         }
+        
       } catch (err) {
-        console.error("Init error:", err);
-        setError("Camera access denied or AI models failed to load. Please ensure you have granted camera permissions.");
+        console.error('Initialization error:', err);
+        setError(err instanceof Error ? err.message : 'Failed to initialize. Please check if the backend server is running.');
         setIsLoading(false);
       }
     };
-
-    initializeMediaPipe();
+    
+    initialize();
     
     return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
-      if (handLandmarkerRef.current) handLandmarkerRef.current.close();
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
       }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      websocketService.disconnect();
       window.speechSynthesis.cancel();
     };
-  }, [processFrame]);
+  }, [captureAndSendFrame, handlePrediction]);
 
   const toggleRecording = () => {
     if (isRecording) {
@@ -231,7 +243,8 @@ export default function App() {
       }
       setIsRecording(false);
     } else {
-      // Starting
+      // Starting: Reset buffer and start recording
+      websocketService.resetBuffer();
       setCurrentSentence([]);
       setIsRecording(true);
     }
@@ -256,7 +269,6 @@ export default function App() {
     { name: "OK", desc: "👌 Thumb & Index Circle" },
     { name: "Rock On", desc: "Index & Pinky Extended" },
     { name: "Call Me", desc: "Thumb & Pinky Extended" },
-    { name: "I Love You", desc: "Index, Pinky & Thumb Extended" },
     { name: "Dislike", desc: "Thumb Pointing Down" }
   ];
 
@@ -275,6 +287,15 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-4">
+          {/* Connection Status */}
+          <div className={cn(
+            "flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-mono",
+            isConnected ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+          )}>
+            {isConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
+            <span className="hidden sm:inline">{isConnected ? "Connected" : "Disconnected"}</span>
+          </div>
+          
           <button 
             onClick={() => setIsTtsEnabled(!isTtsEnabled)}
             className={cn(
@@ -298,14 +319,14 @@ export default function App() {
             {isLoading && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#050505]">
                 <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mb-4" />
-                <p className="text-white/40 font-bold uppercase tracking-widest text-xs">Loading AI Engine</p>
+                <p className="text-white/40 font-bold uppercase tracking-widest text-xs">Connecting to AI Engine...</p>
               </div>
             )}
 
             {error && (
               <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#050505]/95 p-8 text-center">
                 <AlertCircle className="w-16 h-16 text-red-500 mb-6" />
-                <h2 className="text-2xl font-black mb-2 uppercase tracking-tighter">Access Denied</h2>
+                <h2 className="text-2xl font-black mb-2 uppercase tracking-tighter">Connection Error</h2>
                 <p className="text-white/40 max-w-md mb-8 text-sm">{error}</p>
                 <button 
                   onClick={() => window.location.reload()}
@@ -320,8 +341,6 @@ export default function App() {
             <canvas 
               ref={canvasRef} 
               className="w-full h-full object-cover" 
-              width={1280} 
-              height={720} 
             />
 
             {/* Recording Indicator */}
@@ -330,6 +349,19 @@ export default function App() {
               <span className="text-[10px] font-black uppercase tracking-widest text-white/80">
                 {isRecording ? "Recording Sentence" : "Live Stream"}
               </span>
+            </div>
+
+            {/* Hand Detection Indicator */}
+            <div className="absolute top-8 right-8 flex items-center gap-2 px-3 py-2 bg-black/60 backdrop-blur-xl rounded-xl border border-white/10 z-10">
+              <div className={cn("w-2 h-2 rounded-full", handDetected ? "bg-emerald-500" : "bg-red-500")} />
+              <span className="text-[8px] font-mono text-white/60">
+                {handDetected ? "Hand Detected" : "No Hand"}
+              </span>
+            </div>
+
+            {/* Buffer Status */}
+            <div className="absolute bottom-8 left-8 px-3 py-1.5 bg-black/60 backdrop-blur-xl rounded-xl text-[8px] font-mono text-white/40">
+              Buffer: {bufferStatus.buffer_size}/{bufferStatus.max_size}
             </div>
 
             {/* Controls Overlay */}
