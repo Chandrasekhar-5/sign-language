@@ -28,16 +28,15 @@ export function recognizeGesture(landmarks: HandLandmark[]): string {
   const ringExtended = getFingerState(16, 14, 13);
   const pinkyExtended = getFingerState(20, 18, 17);
 
-  // Special checks for OK gesture
+  // Special checks
   const thumbTip = landmarks[4];
   const indexTip = landmarks[8];
   const thumbIndexDistance = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
   
-  // Special check for Rock vs Love
   const rockPosition = !thumbExtended && indexExtended && !middleExtended && !ringExtended && pinkyExtended;
   const lovePosition = thumbExtended && indexExtended && !middleExtended && !ringExtended && pinkyExtended;
 
-  // 1. OK GESTURE - Fixed: Thumb and index circle
+  // 1. OK GESTURE
   if (thumbIndexDistance < 0.08) {
     return GESTURES.OK;
   }
@@ -47,7 +46,7 @@ export function recognizeGesture(landmarks: HandLandmark[]): string {
     return GESTURES.ROCK;
   }
 
-  // 3. THUMBS UP
+  // 3. THUMBS UP / DISLIKE
   if (thumbExtended && !indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
     if (landmarks[4].y < landmarks[2].y) {
       return GESTURES.THUMBS_UP;
@@ -62,7 +61,7 @@ export function recognizeGesture(landmarks: HandLandmark[]): string {
     return GESTURES.POINT;
   }
 
-  // 5. PEACE
+  // 5. PEACE vs NO
   if (indexExtended && middleExtended && !ringExtended && !pinkyExtended) {
     const spread = Math.abs(landmarks[8].x - landmarks[12].x);
     if (spread > 0.05) {
@@ -78,23 +77,23 @@ export function recognizeGesture(landmarks: HandLandmark[]): string {
     return GESTURES.YES;
   }
 
-  // 7. STOP vs HELLO
+  // 7. HELLO (Open palm with fingers spread)
   if (thumbExtended && indexExtended && middleExtended && ringExtended && pinkyExtended) {
     const spread = Math.abs(landmarks[8].x - landmarks[20].x);
-    if (spread < 0.07) {
-      return GESTURES.STOP;
-    }
     if (spread >= 0.07) {
       return GESTURES.HELLO;
     }
+    if (spread < 0.07) {
+      return GESTURES.STOP;
+    }
   }
 
-  // 8. THANK YOU
+  // 8. THANK YOU - Flat hand with thumb tucked (all fingers extended, thumb folded)
   if (!thumbExtended && indexExtended && middleExtended && ringExtended && pinkyExtended) {
     return GESTURES.THANK_YOU;
   }
 
-  // 9. CALL ME
+  // 9. CALL ME (Thumb and pinky extended, like phone shape)
   if (thumbExtended && !indexExtended && !middleExtended && !ringExtended && pinkyExtended) {
     return GESTURES.CALL_ME;
   }

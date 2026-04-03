@@ -65,6 +65,66 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, [isTtsEnabled]);
 
+  // Smart sentence builder for natural language
+  const buildNaturalSentence = (gestures: string[]): string => {
+    if (gestures.length === 0) return "";
+    
+    // Join the gestures into a string for matching
+    const sequence = gestures.join(" + ");
+    
+    // Pre-defined sentence mappings for demo
+    const sentenceMappings: { [key: string]: string } = {
+      // 5 impressive sentences
+      "Hello + Point + Thumbs Up": "Hello, how are you today?",
+      "Hello + Thumbs Up": "Hello, nice to meet you!",
+      "Thank You + Thumbs Up": "Thank you, I really appreciate that!",
+      "OK + Thumbs Up": "Okay, that sounds great!",
+      "Yes + Thank You": "Yes, thank you very much!",
+      "Stop + Point + Hello": "Stop, I need some help over here!",
+      "No + Stop": "No, please stop that.",
+      "Call Me + Thumbs Up": "Please call me, that would be wonderful.",
+      "Rock On + Thumbs Up": "Awesome, you're doing a fantastic job!",
+      "Peace + Hello": "Goodbye, it was nice meeting you!",
+      
+      // Two-word combinations
+      "Hello + Peace": "Hello and goodbye!",
+      "Thank You + OK": "Thank you, that's okay.",
+      "Yes + OK": "Yes, that's perfectly fine.",
+      "No + Dislike": "No, I don't like that at all.",
+      "Point + Stop": "Look over there, stop!",
+      
+      // Single gestures with natural phrasing
+      "Hello": "Hello there!",
+      "Thank You": "Thank you so much!",
+      "Thumbs Up": "Great job!",
+      "Rock On": "Rock on, you're awesome!",
+      "Peace": "Peace out!",
+      "OK": "Okay, sounds good.",
+      "Stop": "Stop right there.",
+      "Yes": "Yes, absolutely!",
+      "No": "No, thank you.",
+      "Call Me": "Please give me a call.",
+      "Dislike": "I don't like that.",
+    };
+    
+    // Check for exact match
+    if (sentenceMappings[sequence]) {
+      return sentenceMappings[sequence];
+    }
+    
+    // Check for partial matches (first 2 gestures)
+    if (gestures.length >= 2) {
+      const firstTwo = gestures.slice(0, 2).join(" + ");
+      if (sentenceMappings[firstTwo]) {
+        const remaining = gestures.slice(2).join(" ");
+        return sentenceMappings[firstTwo] + (remaining ? ` ${remaining}` : "");
+      }
+    }
+    
+    // Default: just join with spaces
+    return gestures.join(" ");
+  };
+
   const processFrame = useCallback(() => {
     if (
       !videoRef.current || 
@@ -279,9 +339,14 @@ export default function App() {
 
   const toggleRecording = () => {
     if (isRecording) {
+      // Stopping: Build natural sentence from recorded gestures
       if (currentSentence.length > 0) {
-        const sentence = currentSentence.join(" ");
-        setHistory(prev => [sentence, ...prev].slice(0, 10));
+        const naturalSentence = buildNaturalSentence(currentSentence);
+        setHistory(prev => [naturalSentence, ...prev].slice(0, 10));
+        
+        // Speak the natural sentence
+        speak(naturalSentence);
+        
         setCurrentSentence([]);
       }
       setIsRecording(false);
@@ -292,25 +357,25 @@ export default function App() {
   };
 
   const speakFullSentence = () => {
-    const sentence = currentSentence.join(" ");
+    const sentence = buildNaturalSentence(currentSentence);
     if (sentence) speak(sentence);
   };
 
   const clearHistory = () => setHistory([]);
 
   const supportedGestures = [
-    { name: "Hello", desc: "Open Palm (Spread Fingers)" },
-    { name: "Stop", desc: "Open Palm (Fingers Together)" },
-    { name: "Yes", desc: "Closed Fist" },
-    { name: "No", desc: "Index & Middle Finger Pinched" },
-    { name: "Thank You", desc: "Flat Hand with Thumb Tucked" },
-    { name: "Thumbs Up", desc: "Thumb Up, Fingers Closed" },
-    { name: "Point", desc: "Index Finger Extended" },
-    { name: "Peace", desc: "V-Shape with Spread Fingers" },
-    { name: "OK", desc: "👌 Thumb & Index Circle" },
-    { name: "Rock On", desc: "Index & Pinky Extended" },
-    { name: "Call Me", desc: "Thumb & Pinky Extended" },
-    { name: "Dislike", desc: "Thumb Pointing Down" }
+    { name: "Hello", desc: "Open Palm (Fingers Spread)", emoji: "👋" },
+    { name: "Stop", desc: "Open Palm (Fingers Together)", emoji: "✋" },
+    { name: "Yes", desc: "Closed Fist", emoji: "✊" },
+    { name: "No", desc: "Index & Middle Pinched", emoji: "🤏" },
+    { name: "Thank You", desc: "Flat Hand, Thumb Tucked", emoji: "🤚" },
+    { name: "Thumbs Up", desc: "Thumb Up, Fingers Closed", emoji: "👍" },
+    { name: "Point", desc: "Index Finger Extended", emoji: "☝️" },
+    { name: "Peace", desc: "V-Shape with Spread Fingers", emoji: "✌️" },
+    { name: "OK", desc: "Thumb & Index Circle", emoji: "👌" },
+    { name: "Rock On", desc: "Index & Pinky Extended", emoji: "🤘" },
+    { name: "Call Me", desc: "Thumb & Pinky Extended", emoji: "🤙" },
+    { name: "Dislike", desc: "Thumb Pointing Down", emoji: "👎" },
   ];
 
   return (
@@ -514,6 +579,117 @@ export default function App() {
           </div>
         </div>
 
+        {/* Demo Sentences Guide */}
+        <div className="bg-emerald-500/10 rounded-[2.5rem] p-8 border border-emerald-500/20">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center">
+              <span className="text-black text-xl">🎯</span>
+            </div>
+            <h2 className="text-xl font-black tracking-tighter uppercase">Demo Sentences</h2>
+            <span className="text-[10px] px-2 py-1 bg-emerald-500/20 rounded-full text-emerald-400">Try These!</span>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 hover:border-emerald-500/30 transition-all cursor-pointer"
+                 onClick={() => {
+                   const demoSequence = ["Hello", "Point", "Thumbs Up"];
+                   setCurrentSentence(demoSequence);
+                   speak(buildNaturalSentence(demoSequence));
+                 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">👋</span>
+                <span className="text-2xl">☝️</span>
+                <span className="text-2xl">👍</span>
+                <span className="text-emerald-400 ml-auto text-xs">Click to demo</span>
+              </div>
+              <p className="text-sm font-bold text-white">"Hello, how are you today?"</p>
+              <p className="text-[10px] text-white/40 mt-1">Hello → Point → Thumbs Up</p>
+            </div>
+            
+            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 hover:border-emerald-500/30 transition-all cursor-pointer"
+                 onClick={() => {
+                   const demoSequence = ["Thank You", "Thumbs Up"];
+                   setCurrentSentence(demoSequence);
+                   speak(buildNaturalSentence(demoSequence));
+                 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">🤚</span>
+                <span className="text-2xl">👍</span>
+                <span className="text-emerald-400 ml-auto text-xs">Click to demo</span>
+              </div>
+              <p className="text-sm font-bold text-white">"Thank you, I really appreciate that!"</p>
+              <p className="text-[10px] text-white/40 mt-1">Thank You → Thumbs Up</p>
+            </div>
+            
+            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 hover:border-emerald-500/30 transition-all cursor-pointer"
+                 onClick={() => {
+                   const demoSequence = ["OK", "Thumbs Up"];
+                   setCurrentSentence(demoSequence);
+                   speak(buildNaturalSentence(demoSequence));
+                 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">👌</span>
+                <span className="text-2xl">👍</span>
+                <span className="text-emerald-400 ml-auto text-xs">Click to demo</span>
+              </div>
+              <p className="text-sm font-bold text-white">"Okay, that sounds great!"</p>
+              <p className="text-[10px] text-white/40 mt-1">OK → Thumbs Up</p>
+            </div>
+            
+            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 hover:border-emerald-500/30 transition-all cursor-pointer"
+                 onClick={() => {
+                   const demoSequence = ["Yes", "Thank You"];
+                   setCurrentSentence(demoSequence);
+                   speak(buildNaturalSentence(demoSequence));
+                 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">✊</span>
+                <span className="text-2xl">🙏</span>
+                <span className="text-emerald-400 ml-auto text-xs">Click to demo</span>
+              </div>
+              <p className="text-sm font-bold text-white">"Yes, thank you very much!"</p>
+              <p className="text-[10px] text-white/40 mt-1">Yes → Thank You</p>
+            </div>
+            
+            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 hover:border-emerald-500/30 transition-all cursor-pointer"
+                 onClick={() => {
+                   const demoSequence = ["Rock On", "Thumbs Up"];
+                   setCurrentSentence(demoSequence);
+                   speak(buildNaturalSentence(demoSequence));
+                 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">🤘</span>
+                <span className="text-2xl">👍</span>
+                <span className="text-emerald-400 ml-auto text-xs">Click to demo</span>
+              </div>
+              <p className="text-sm font-bold text-white">"Awesome, you're doing a fantastic job!"</p>
+              <p className="text-[10px] text-white/40 mt-1">Rock On → Thumbs Up</p>
+            </div>
+            
+            <div className="p-4 bg-white/5 rounded-2xl border border-white/10 hover:border-emerald-500/30 transition-all cursor-pointer"
+                 onClick={() => {
+                   const demoSequence = ["Call Me", "Thumbs Up"];
+                   setCurrentSentence(demoSequence);
+                   speak(buildNaturalSentence(demoSequence));
+                 }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-2xl">🤙</span>
+                <span className="text-2xl">👍</span>
+                <span className="text-emerald-400 ml-auto text-xs">Click to demo</span>
+              </div>
+              <p className="text-sm font-bold text-white">"Please call me, that would be wonderful."</p>
+              <p className="text-[10px] text-white/40 mt-1">Call Me → Thumbs Up</p>
+            </div>
+          </div>
+          
+          <div className="mt-6 p-4 bg-emerald-500/5 rounded-xl border border-emerald-500/10">
+            <p className="text-xs text-white/60 flex items-center gap-2">
+              <span className="text-emerald-400">💡</span>
+              <strong>How to demo:</strong> Press "START RECORDING", perform the gestures in sequence, then press "STOP RECORDING" to hear the full sentence!
+            </p>
+          </div>
+        </div>
+
         {/* Bottom Row: Supported Signs */}
         <div className="bg-white/5 rounded-[2.5rem] p-10 border border-white/5">
           <div className="flex justify-between items-center mb-8">
@@ -529,9 +705,10 @@ export default function App() {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            {supportedGestures.slice(0, 5).map((sign) => (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {supportedGestures.slice(0, 8).map((sign) => (
               <div key={sign.name} className="p-6 bg-white/5 rounded-3xl border border-white/5 hover:border-emerald-500/30 transition-all group">
+                <div className="text-3xl mb-2">{sign.emoji}</div>
                 <p className="text-sm font-black text-white/90 mb-1 group-hover:text-emerald-400 transition-colors uppercase tracking-tight">{sign.name}</p>
                 <p className="text-[10px] text-white/30 font-medium">{sign.desc}</p>
               </div>
@@ -566,6 +743,7 @@ export default function App() {
               <div className="p-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
                 {supportedGestures.map((sign) => (
                   <div key={sign.name} className="p-8 bg-white/5 rounded-4xl border border-white/5">
+                    <div className="text-4xl mb-3">{sign.emoji}</div>
                     <p className="text-xl font-black text-emerald-400 mb-2 uppercase tracking-tight">{sign.name}</p>
                     <p className="text-xs text-white/40 font-medium leading-relaxed">{sign.desc}</p>
                   </div>
