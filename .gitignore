@@ -1,8 +1,49 @@
-node_modules/
-build/
-dist/
-coverage/
-.DS_Store
+# -----------------------------
+# Python (Backend)
+# -----------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# Virtual Environment
+venv/
+.env
+
+# ML Models (if large)
+*.h5
+*.pt
+*.pth
+*.joblib
+models/
+
+# Logs
 *.log
-.env*
-!.env.example
+
+# -----------------------------
+# Node (Frontend)
+# -----------------------------
+node_modules/
+dist/
+build/
+
+# Env files
+.env
+.env.local
+.env.development
+.env.production
+
+# -----------------------------
+# OS / IDE
+# -----------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# -----------------------------
+# Misc
+# -----------------------------
+*.tmp
+*.bak
