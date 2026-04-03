@@ -14,6 +14,8 @@ from .config import config
 from .websocket_manager import websocket_manager
 from .hand_tracker import HandTracker
 from .gesture_model import GestureModel
+from .sentence_builder import sentence_builder
+from typing import List
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +52,13 @@ try:
         logger.warning(f"Could not load model from {config.MODEL_PATH}, using mock predictions")
 except Exception as e:
     logger.warning(f"Error loading model: {e}, using mock predictions")
+
+
+@app.post("/build-sentence")
+async def build_sentence_endpoint(gestures: List[str]):
+    """Build a sentence from a list of gestures."""
+    sentence = sentence_builder.build_sentence(gestures)
+    return {"sentence": sentence, "suggestions": sentence_builder.suggest_next_gestures(gestures)}
 
 @app.get("/")
 async def root():
