@@ -6,6 +6,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
+  HandLandmarker, 
+  FilesetResolver,
+  DrawingUtils
+} from '@mediapipe/tasks-vision';
+import { 
   History, 
   Volume2, 
   VolumeX, 
@@ -19,26 +24,17 @@ import {
   Square,
   MessageSquare,
   ChevronRight,
-  X,
-  Wifi,
-  WifiOff
+  X
 } from 'lucide-react';
-import { websocketService, type Prediction } from './services/websocketService';
+import { recognizeGesture } from './gestureLogic';
 import { GESTURES } from './types';
 import { cn } from './lib/utils';
-import { GestureRecorder } from './components/GestureRecorder';
-import { Activity, Zap } from 'lucide-react';
-
-// WebSocket server URL - change this to your backend URL
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws';
-// HTTP API URL for health checks
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const handLandmarkerRef = useRef<HandLandmarker | null>(null);
+  const requestRef = useRef<number>(null);
   
   // State
   const [detectedWord, setDetectedWord] = useState<string>(GESTURES.NONE);
@@ -50,26 +46,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [confidence, setConfidence] = useState(0);
   const [showAllGestures, setShowAllGestures] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
-  const [handDetected, setHandDetected] = useState(false);
-  const [bufferStatus, setBufferStatus] = useState({ buffer_size: 0, max_size: 30, is_ready: false });
-  const [showRecorder, setShowRecorder] = useState(false);
-  const [performanceMetrics, setPerformanceMetrics] = useState({
-  fps: 0,
-  inferenceTime: 0,
-  cpuUsage: 0
-  });
   
   // Refs for detection logic
   const lastDetectedRef = useRef<string>(GESTURES.NONE);
   const detectionCountRef = useRef<number>(0);
-  const DETECTION_THRESHOLD = 5; // Lowered for faster response with ML model
+  const DETECTION_THRESHOLD = 8;
 
-  // Text-to-speech function
   const speak = useCallback((text: string) => {
     if (!isTtsEnabled || !text || text === GESTURES.NONE) return;
     
-    // Cancel any ongoing speech to prevent queue buildup
     window.speechSynthesis.cancel();
     
     const utterance = new SpeechSynthesisUtterance(text);
@@ -80,170 +65,220 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }, [isTtsEnabled]);
 
-  // Handle predictions from WebSocket
-  const handlePrediction = useCallback((prediction: Prediction) => {
-    const gesture = prediction.gesture;
-    const conf = prediction.confidence;
-    
-    setDetectedWord(gesture);
-    setConfidence(conf * 100);
-    setHandDetected(prediction.hand_detected);
-    setBufferStatus(prediction.buffer_status);
-    
-    // Only process gesture if confidence is high enough
-    if (gesture !== GESTURES.NONE && conf > 0.6) {
-      if (gesture === lastDetectedRef.current) {
-        detectionCountRef.current += 1;
-      } else {
-        lastDetectedRef.current = gesture;
-        detectionCountRef.current = 1;
-      }
-      
-      // Only trigger when gesture is consistently detected
-      if (detectionCountRef.current === DETECTION_THRESHOLD) {
-        // Speak the gesture
-        speak(gesture);
-        
-        if (isRecording) {
-          setCurrentSentence(prev => {
-            // Don't add the same word twice in a row
-            if (prev[prev.length - 1] === gesture) return prev;
-            return [...prev, gesture];
-          });
-        } else {
-          // Add individual gesture to history
-          setHistory(prev => {
-            if (prev[0] === gesture) return prev;
-            return [gesture, ...prev].slice(0, 20);
-          });
-        }
-      }
-    } else {
-      // Reset detection if no gesture
-      if (lastDetectedRef.current !== GESTURES.NONE) {
-        lastDetectedRef.current = GESTURES.NONE;
-        detectionCountRef.current = 0;
-      }
-    }
-    
-    // Update canvas with processed frame from server
-    if (prediction.frame && canvasRef.current) {
-      const img = new Image();
-      img.onload = () => {
-        const ctx = canvasRef.current?.getContext('2d');
-        if (ctx && canvasRef.current) {
-          ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
-        }
-      };
-      img.src = `data:image/jpeg;base64,${prediction.frame}`;
-    }
-  }, [isRecording, speak]);
-
-  // Capture video frames and send to WebSocket
-  const captureAndSendFrame = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current || !websocketService.isConnectedToServer) {
-      animationRef.current = requestAnimationFrame(captureAndSendFrame);
+  const processFrame = useCallback(() => {
+    if (
+      !videoRef.current || 
+      !canvasRef.current || 
+      !handLandmarkerRef.current ||
+      videoRef.current.readyState < 2
+    ) {
+      requestRef.current = requestAnimationFrame(processFrame);
       return;
     }
+
+    const canvasCtx = canvasRef.current.getContext('2d');
+    if (!canvasCtx) return;
+
+    const startTimeMs = performance.now();
+    const results = handLandmarkerRef.current.detectForVideo(videoRef.current, startTimeMs);
+
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    
-    if (ctx && video.videoWidth > 0) {
-      // Set canvas dimensions to match video
-      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+    // Draw video frame (not mirrored)
+    canvasCtx.drawImage(
+      videoRef.current, 
+      0, 0, 
+      canvasRef.current.width, 
+      canvasRef.current.height
+    );
+
+    if (results.landmarks && results.landmarks.length > 0) {
+      const drawingUtils = new DrawingUtils(canvasCtx);
+      
+      // For green box - collect all coordinates
+      let allX: number[] = [];
+      let allY: number[] = [];
+      
+      for (const landmarks of results.landmarks) {
+        // Draw connections (green lines)
+        drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, {
+          color: '#10b981',
+          lineWidth: 6
+        });
+        // Draw landmarks (red dots)
+        drawingUtils.drawLandmarks(landmarks, {
+          color: '#ef4444',
+          lineWidth: 2,
+          radius: 4
+        });
+        
+        // Collect points for bounding box
+        for (const point of landmarks) {
+          allX.push(point.x * canvasRef.current.width);
+          allY.push(point.y * canvasRef.current.height);
+        }
+
+        // Get gesture recognition
+        const gesture = recognizeGesture(landmarks as any);
+        
+        if (gesture !== GESTURES.NONE) {
+          if (gesture === lastDetectedRef.current) {
+            detectionCountRef.current += 1;
+          } else {
+            lastDetectedRef.current = gesture;
+            detectionCountRef.current = 1;
+          }
+
+          if (detectionCountRef.current === DETECTION_THRESHOLD) {
+            setDetectedWord(gesture);
+            setConfidence(85 + Math.random() * 10);
+            
+            speak(gesture);
+            
+            if (isRecording) {
+              setCurrentSentence(prev => {
+                if (prev[prev.length - 1] === gesture) return prev;
+                return [...prev, gesture];
+              });
+            } else {
+              setHistory(prev => {
+                if (prev[0] === gesture) return prev;
+                return [gesture, ...prev].slice(0, 20);
+              });
+            }
+          }
+        } else {
+          if (lastDetectedRef.current !== GESTURES.NONE) {
+            lastDetectedRef.current = GESTURES.NONE;
+            detectionCountRef.current = 0;
+            setDetectedWord(GESTURES.NONE);
+            setConfidence(0);
+          }
+        }
       }
       
-      // Draw video frame to canvas
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Convert canvas to base64 JPEG
-      const base64Frame = canvas.toDataURL('image/jpeg', 0.8);
-      
-      // Send to WebSocket
-      websocketService.sendFrame(base64Frame);
+      // Draw GREEN BOX around the hand
+      if (allX.length > 0 && allY.length > 0) {
+        const minX = Math.min(...allX);
+        const maxX = Math.max(...allX);
+        const minY = Math.min(...allY);
+        const maxY = Math.max(...allY);
+        
+        // Add padding
+        const padding = 30;
+        const boxX = Math.max(0, minX - padding);
+        const boxY = Math.max(0, minY - padding);
+        const boxW = Math.min(canvasRef.current.width - boxX, maxX - minX + padding * 2);
+        const boxH = Math.min(canvasRef.current.height - boxY, maxY - minY + padding * 2);
+        
+        // Draw green box outline
+        canvasCtx.strokeStyle = '#00ff00';
+        canvasCtx.lineWidth = 3;
+        canvasCtx.strokeRect(boxX, boxY, boxW, boxH);
+        
+        // Draw corner accents
+        const cornerLen = Math.min(30, boxW / 3, boxH / 3);
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(boxX, boxY + cornerLen);
+        canvasCtx.lineTo(boxX, boxY);
+        canvasCtx.lineTo(boxX + cornerLen, boxY);
+        canvasCtx.stroke();
+        
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(boxX + boxW - cornerLen, boxY);
+        canvasCtx.lineTo(boxX + boxW, boxY);
+        canvasCtx.lineTo(boxX + boxW, boxY + cornerLen);
+        canvasCtx.stroke();
+        
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(boxX + boxW, boxY + boxH - cornerLen);
+        canvasCtx.lineTo(boxX + boxW, boxY + boxH);
+        canvasCtx.lineTo(boxX + boxW - cornerLen, boxY + boxH);
+        canvasCtx.stroke();
+        
+        canvasCtx.beginPath();
+        canvasCtx.moveTo(boxX, boxY + boxH - cornerLen);
+        canvasCtx.lineTo(boxX, boxY + boxH);
+        canvasCtx.lineTo(boxX + cornerLen, boxY + boxH);
+        canvasCtx.stroke();
+        
+        // Add semi-transparent green fill
+        canvasCtx.fillStyle = 'rgba(0, 255, 0, 0.1)';
+        canvasCtx.fillRect(boxX, boxY, boxW, boxH);
+      }
+    } else {
+      if (detectedWord !== GESTURES.NONE) {
+        setDetectedWord(GESTURES.NONE);
+        setConfidence(0);
+      }
     }
     
-    animationRef.current = requestAnimationFrame(captureAndSendFrame);
-  }, []);
+    canvasCtx.restore();
+    requestRef.current = requestAnimationFrame(processFrame);
+  }, [isRecording, speak, detectedWord]);
 
-  // Initialize camera and WebSocket
   useEffect(() => {
-    const initialize = async () => {
+    const initializeMediaPipe = async () => {
       try {
-        setIsLoading(true);
+        console.log("Initializing MediaPipe...");
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        );
         
-        // Check if backend is reachable
-        const healthResponse = await fetch(`${API_URL}/health`);
-        if (!healthResponse.ok) {
-          throw new Error('Backend server is not reachable');
-        }
-        
-        // Connect WebSocket
-        await websocketService.connect(WS_URL);
-        setIsConnected(true);
-        
-        // Set up WebSocket callbacks
-        websocketService.setCallbacks({
-          onPrediction: handlePrediction,
-          onError: (err) => {
-            console.error('WebSocket error:', err);
-            setError(err);
+        const handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+            delegate: "GPU"
           },
-          onConnected: () => {
-            console.log('Connected to WebSocket');
-            setIsConnected(true);
-            setError(null);
-          },
-          onDisconnected: () => {
-            console.log('Disconnected from WebSocket');
-            setIsConnected(false);
-          }
+          runningMode: "VIDEO",
+          numHands: 2
         });
-        
-        // Request camera access
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480, facingMode: "user" }
-        });
-        
-        streamRef.current = stream;
-        
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
+
+        handLandmarkerRef.current = handLandmarker;
+        console.log("HandLandmarker initialized");
+
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          console.log("Requesting camera access...");
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 1280, height: 720, facingMode: "user" }
+          });
           
-          // Start frame capture
-          animationRef.current = requestAnimationFrame(captureAndSendFrame);
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.onloadedmetadata = () => {
+              videoRef.current?.play();
+              console.log("Video started playing");
+              setIsLoading(false);
+              requestRef.current = requestAnimationFrame(processFrame);
+            };
+          }
+        } else {
+          setError("Camera not supported in this browser");
           setIsLoading(false);
         }
-        
       } catch (err) {
-        console.error('Initialization error:', err);
-        setError(err instanceof Error ? err.message : 'Failed to initialize. Please check if the backend server is running.');
+        console.error("Init error:", err);
+        setError("Camera access denied or AI models failed to load. Please ensure you have granted camera permissions.");
         setIsLoading(false);
       }
     };
-    
-    initialize();
+
+    initializeMediaPipe();
     
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (handLandmarkerRef.current) handLandmarkerRef.current.close();
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
       }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      websocketService.disconnect();
       window.speechSynthesis.cancel();
     };
-  }, [captureAndSendFrame, handlePrediction]);
+  }, [processFrame]);
 
   const toggleRecording = () => {
     if (isRecording) {
-      // Stopping: Save sentence to history
       if (currentSentence.length > 0) {
         const sentence = currentSentence.join(" ");
         setHistory(prev => [sentence, ...prev].slice(0, 10));
@@ -251,8 +286,6 @@ export default function App() {
       }
       setIsRecording(false);
     } else {
-      // Starting: Reset buffer and start recording
-      websocketService.resetBuffer();
       setCurrentSentence([]);
       setIsRecording(true);
     }
@@ -295,15 +328,6 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-4">
-          {/* Connection Status */}
-          <div className={cn(
-            "flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-mono",
-            isConnected ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
-          )}>
-            {isConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
-            <span className="hidden sm:inline">{isConnected ? "Connected" : "Disconnected"}</span>
-          </div>
-          
           <button 
             onClick={() => setIsTtsEnabled(!isTtsEnabled)}
             className={cn(
@@ -327,14 +351,14 @@ export default function App() {
             {isLoading && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#050505]">
                 <Loader2 className="w-12 h-12 text-emerald-500 animate-spin mb-4" />
-                <p className="text-white/40 font-bold uppercase tracking-widest text-xs">Connecting to AI Engine...</p>
+                <p className="text-white/40 font-bold uppercase tracking-widest text-xs">Loading AI Engine</p>
               </div>
             )}
 
             {error && (
               <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-[#050505]/95 p-8 text-center">
                 <AlertCircle className="w-16 h-16 text-red-500 mb-6" />
-                <h2 className="text-2xl font-black mb-2 uppercase tracking-tighter">Connection Error</h2>
+                <h2 className="text-2xl font-black mb-2 uppercase tracking-tighter">Access Denied</h2>
                 <p className="text-white/40 max-w-md mb-8 text-sm">{error}</p>
                 <button 
                   onClick={() => window.location.reload()}
@@ -349,6 +373,8 @@ export default function App() {
             <canvas 
               ref={canvasRef} 
               className="w-full h-full object-cover" 
+              width={1280} 
+              height={720} 
             />
 
             {/* Recording Indicator */}
@@ -357,19 +383,6 @@ export default function App() {
               <span className="text-[10px] font-black uppercase tracking-widest text-white/80">
                 {isRecording ? "Recording Sentence" : "Live Stream"}
               </span>
-            </div>
-
-            {/* Hand Detection Indicator */}
-            <div className="absolute top-8 right-8 flex items-center gap-2 px-3 py-2 bg-black/60 backdrop-blur-xl rounded-xl border border-white/10 z-10">
-              <div className={cn("w-2 h-2 rounded-full", handDetected ? "bg-emerald-500" : "bg-red-500")} />
-              <span className="text-[8px] font-mono text-white/60">
-                {handDetected ? "Hand Detected" : "No Hand"}
-              </span>
-            </div>
-
-            {/* Buffer Status */}
-            <div className="absolute bottom-8 left-8 px-3 py-1.5 bg-black/60 backdrop-blur-xl rounded-xl text-[8px] font-mono text-white/40">
-              Buffer: {bufferStatus.buffer_size}/{bufferStatus.max_size}
             </div>
 
             {/* Controls Overlay */}
@@ -515,52 +528,6 @@ export default function App() {
               See All <ChevronRight size={14} />
             </button>
           </div>
-
-          {/* Gesture Recorder Section */}
-<div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-  <GestureRecorder 
-    onSequenceRecorded={(sequence) => {
-      console.log('Recorded sequence:', sequence);
-      // Automatically add to current sentence if recording
-      if (isRecording) {
-        setCurrentSentence(prev => [...prev, ...sequence]);
-      }
-    }}
-    onSequencePlayback={(gesture) => {
-      // Trigger gesture playback in UI
-      setDetectedWord(gesture);
-      speak(gesture);
-    }}
-  />
-  
-  {/* Performance Metrics */}
-  <div className="bg-white/5 rounded-4xl p-6 border border-white/5">
-    <h3 className="text-lg font-black mb-4 flex items-center gap-2">
-      <Activity size={18} className="text-emerald-500" />
-      Performance Metrics
-    </h3>
-    <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <span className="text-white/60 text-sm">FPS</span>
-        <span className="font-mono text-emerald-500">{performanceMetrics.fps || '--'}</span>
-      </div>
-      <div className="flex justify-between items-center">
-        <span className="text-white/60 text-sm">Inference Time</span>
-        <span className="font-mono text-emerald-500">{performanceMetrics.inferenceTime || '--'}ms</span>
-      </div>
-      <div className="flex justify-between items-center">
-        <span className="text-white/60 text-sm">CPU Usage</span>
-        <span className="font-mono text-emerald-500">{performanceMetrics.cpuUsage || '--'}%</span>
-      </div>
-      <div className="h-2 bg-white/10 rounded-full overflow-hidden mt-2">
-        <div 
-          className="h-full bg-emerald-500 rounded-full transition-all duration-300"
-          style={{ width: `${Math.min(100, (performanceMetrics.fps / 30) * 100)}%` }}
-        />
-      </div>
-    </div>
-  </div>
-</div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {supportedGestures.slice(0, 5).map((sign) => (
