@@ -1,29 +1,34 @@
 import numpy as np
 import logging
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
 from .config import config
+from .lstm_model import LSTMGestureModel, TrainingConfig
 
 logger = logging.getLogger(__name__)
 
 class GestureModel:
     """
-    Placeholder for LSTM model - will be fully implemented in Iteration 2.
-    Currently provides mock predictions for testing the pipeline.
+    Gesture recognition model wrapper.
+    Uses LSTM model for dynamic gesture recognition.
     """
     
     def __init__(self):
         """Initialize the gesture model."""
+        # Initialize LSTM model
+        training_config = TrainingConfig(
+            sequence_length=config.SEQUENCE_LENGTH,
+            num_features=63,  # 21 landmarks * 3 coordinates
+            num_classes=len(config.GESTURE_CLASSES)
+        )
+        self.model = LSTMGestureModel(training_config)
         self.is_trained = False
-        self.sequence_buffer = []
-        self.buffer_size = config.SEQUENCE_LENGTH
-        self.classes = config.GESTURE_CLASSES
         
         # For tracking consecutive detections
         self.last_prediction = None
         self.consecutive_count = 0
-        self.confidence_buffer = []
+        self.confidence_threshold = config.CONFIDENCE_THRESHOLD
         
-        logger.info(f"GestureModel initialized with {len(self.classes)} classes")
+        logger.info(f"GestureModel initialized with {len(config.GESTURE_CLASSES)} classes")
     
     def add_landmarks(self, landmarks: np.ndarray) -> Optional[Tuple[str, float]]:
         """
@@ -38,57 +43,23 @@ class GestureModel:
         if landmarks is None:
             return None
         
-        # Flatten landmarks: 21 points * 3 coordinates = 63 features
-        flattened = landmarks.flatten()
+        # Pass to LSTM model
+        result = self.model.add_landmarks(landmarks)
         
-        # Add to buffer
-        self.sequence_buffer.append(flattened)
-        
-        # Keep buffer at maximum size
-        if len(self.sequence_buffer) > self.buffer_size:
-            self.sequence_buffer.pop(0)
-        
-        # Predict only when buffer is full
-        if len(self.sequence_buffer) == self.buffer_size:
-            return self._predict()
+        if result:
+            gesture_name, confidence, _ = result
+            
+            # Apply confidence threshold
+            if confidence < self.confidence_threshold:
+                return "None", confidence
+            
+            return gesture_name, confidence
         
         return None
-    
-    def _predict(self) -> Tuple[str, float]:
-        """
-        Predict gesture from sequence buffer.
-        Placeholder implementation - will be replaced with actual LSTM prediction.
-        
-        Returns:
-            Tuple of (gesture_name, confidence)
-        """
-        # Placeholder: Use simple logic to return mock predictions
-        # In real implementation, this would use the trained LSTM model
-        
-        # For now, return "None" with low confidence
-        # This allows testing the pipeline without the ML model
-        gesture = "None"
-        confidence = 0.0
-        
-        # Simple mock: Check if we have any movement
-        if len(self.sequence_buffer) == self.buffer_size:
-            # Calculate variance to simulate movement detection
-            buffer_array = np.array(self.sequence_buffer)
-            variance = np.var(buffer_array, axis=0).mean()
-            
-            if variance > 0.001:  # Some movement detected
-                # Mock prediction - for testing only
-                import random
-                gesture = random.choice(config.GESTURE_CLASSES[:-1])  # Exclude "None"
-                confidence = 0.5 + random.random() * 0.4
-                logger.debug(f"Mock prediction: {gesture} with confidence {confidence:.2f}")
-        
-        return gesture, confidence
     
     def load_model(self, model_path: str) -> bool:
         """
         Load trained model from file.
-        Will be implemented in Iteration 2.
         
         Args:
             model_path: Path to the saved model
@@ -96,22 +67,20 @@ class GestureModel:
         Returns:
             bool: True if model loaded successfully
         """
-        logger.info(f"Model loading placeholder - will be implemented in Iteration 2")
-        # Placeholder - actual implementation will load .h5 or .pth file
-        self.is_trained = True
-        return True
+        success = self.model.load_model(model_path)
+        if success:
+            self.is_trained = True
+            logger.info(f"Model loaded from {model_path}")
+        else:
+            logger.warning(f"Could not load model from {model_path}, using fallback")
+        return success
     
     def reset(self):
         """Reset the sequence buffer."""
-        self.sequence_buffer = []
+        self.model.reset()
         self.last_prediction = None
         self.consecutive_count = 0
-        self.confidence_buffer = []
     
     def get_buffer_status(self) -> dict:
         """Get current buffer status."""
-        return {
-            "buffer_size": len(self.sequence_buffer),
-            "max_size": self.buffer_size,
-            "is_ready": len(self.sequence_buffer) == self.buffer_size
-        }
+        return self.model.get_buffer_status()
