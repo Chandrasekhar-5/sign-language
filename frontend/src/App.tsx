@@ -26,6 +26,8 @@ import {
 import { websocketService, type Prediction } from './services/websocketService';
 import { GESTURES } from './types';
 import { cn } from './lib/utils';
+import { GestureRecorder } from './components/GestureRecorder';
+import { Activity, Zap } from 'lucide-react';
 
 // WebSocket server URL - change this to your backend URL
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws';
@@ -51,6 +53,12 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [handDetected, setHandDetected] = useState(false);
   const [bufferStatus, setBufferStatus] = useState({ buffer_size: 0, max_size: 30, is_ready: false });
+  const [showRecorder, setShowRecorder] = useState(false);
+  const [performanceMetrics, setPerformanceMetrics] = useState({
+  fps: 0,
+  inferenceTime: 0,
+  cpuUsage: 0
+  });
   
   // Refs for detection logic
   const lastDetectedRef = useRef<string>(GESTURES.NONE);
@@ -507,6 +515,52 @@ export default function App() {
               See All <ChevronRight size={14} />
             </button>
           </div>
+
+          {/* Gesture Recorder Section */}
+<div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+  <GestureRecorder 
+    onSequenceRecorded={(sequence) => {
+      console.log('Recorded sequence:', sequence);
+      // Automatically add to current sentence if recording
+      if (isRecording) {
+        setCurrentSentence(prev => [...prev, ...sequence]);
+      }
+    }}
+    onSequencePlayback={(gesture) => {
+      // Trigger gesture playback in UI
+      setDetectedWord(gesture);
+      speak(gesture);
+    }}
+  />
+  
+  {/* Performance Metrics */}
+  <div className="bg-white/5 rounded-4xl p-6 border border-white/5">
+    <h3 className="text-lg font-black mb-4 flex items-center gap-2">
+      <Activity size={18} className="text-emerald-500" />
+      Performance Metrics
+    </h3>
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <span className="text-white/60 text-sm">FPS</span>
+        <span className="font-mono text-emerald-500">{performanceMetrics.fps || '--'}</span>
+      </div>
+      <div className="flex justify-between items-center">
+        <span className="text-white/60 text-sm">Inference Time</span>
+        <span className="font-mono text-emerald-500">{performanceMetrics.inferenceTime || '--'}ms</span>
+      </div>
+      <div className="flex justify-between items-center">
+        <span className="text-white/60 text-sm">CPU Usage</span>
+        <span className="font-mono text-emerald-500">{performanceMetrics.cpuUsage || '--'}%</span>
+      </div>
+      <div className="h-2 bg-white/10 rounded-full overflow-hidden mt-2">
+        <div 
+          className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+          style={{ width: `${Math.min(100, (performanceMetrics.fps / 30) * 100)}%` }}
+        />
+      </div>
+    </div>
+  </div>
+</div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             {supportedGestures.slice(0, 5).map((sign) => (
