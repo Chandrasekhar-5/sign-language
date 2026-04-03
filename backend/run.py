@@ -41,7 +41,7 @@ if __name__ == "__main__":
             "app.main:app",
             host=config.HOST,
             port=config.PORT,
-            reload=True,
+            reload=False,
             log_level="info"
         )
     finally:
